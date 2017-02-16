@@ -1,7 +1,7 @@
 .idea
 heca/tool/hecaserve
 heca/tool/l[aeiou]l[aeiou].go
-Hecatoncheires.iml
+heca.iml
 conf
 pkg
 src
