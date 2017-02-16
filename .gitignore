@@ -1,7 +1,7 @@
 .idea
-heca/tool/hecaserve
-heca/tool/l[aeiou]l[aeiou].go
-heca.iml
+tool/hecaserve
+tool/l[aeiou]l[aeiou].go
+*.iml
 conf
 pkg
 src
