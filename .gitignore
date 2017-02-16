@@ -22,3 +22,11 @@ _testmain.go
 *.exe
 *.test
 *.prof
+
+# for IntelliJ IDEA
+.idea
+heca/tool/hecaserve
+Hecatoncheires.iml
+conf
+pkg
+src
