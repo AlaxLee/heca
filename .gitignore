@@ -26,6 +26,7 @@ _testmain.go
 # for IntelliJ IDEA
 .idea
 heca/tool/hecaserve
+heca/tool/lala.go
 Hecatoncheires.iml
 conf
 pkg
