@@ -2,8 +2,6 @@ package heca
 
 import (
 	"fmt"
-	"time"
-
 	"net/http"
 	_ "net/http/pprof"
 	"encoding/json"
@@ -97,10 +95,6 @@ func (a *apiServer) start() {
 	go func() {
 		fmt.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
-
-	for {
-		time.Sleep( 5 * time.Second )
-	}
 }
 
 func RenderJson(w http.ResponseWriter, v interface{}) {
@@ -198,25 +192,4 @@ func (a *apiServer) UpdateJob(jobid string, jobConfigString string) (result inte
 	}
 	return
 }
-
-
-
-/*
-api 对外提供接口：
-	查性能
-	任务操作：增加、删除、修改、查询（单个和全部）
-	当前实例的信息：实例总数、本实例编号、获得的配置内容
-
-controller:
-	控制并发（要知道当前活着的 Goroutine 有哪些，应该有哪些，哪些异常退出了，缺了的能创建，多出来的就关掉）
-
-
-考虑每个任务放在一个go里面，这样一来就需要检测任务是不是挂了，挂了就要重新启动
-
-任务必须写明是否有周期性
-如果有周期性，为了保证周期任务的准确性，需要产生新协程来执行，这样就要求，新协程内的代码必须有超时结束机制
-即，周期性的执行体必须自带超时结束机制
-
-数据的返回由执行体自身实施，还是controller统一收集呢？
-*/
 

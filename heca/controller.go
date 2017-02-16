@@ -36,8 +36,10 @@ type Job struct {
 	jobType         string       //这个值用来做JobDo的类型名字
 	jobInterval     int          //执行周期，小于0或等于0 表示无周期
 
-	starttime       time.Time
-	mesg            chan string
+	starttime       time.Time    //任务的开始时间
+	mesg            chan string  //任务的控制信息
+
+	result		chan<- interface{}  //任务的结果反馈
 
 	configString    string       //本job的配置，未曾解析过
 	config          *viper.Viper //本job的配置，已经解析过了
@@ -53,6 +55,7 @@ func NewController() *Controller {
 			configs: make(map[string]interface{}),
 			changeTime: time.Now(),
 		},
+		resultQueue: make(chan interface{}, 5 * 1000 * 1000),
 		jobsMutex: &sync.RWMutex{},
 		jobs: make(map[string]*Job),
 	}
@@ -70,6 +73,11 @@ func (ct *Controller) Start() {
 
 	//启API监听
 	ct.startAPI()
+
+	//保持主进程活着
+	for {
+		time.Sleep( 5 * time.Second )
+	}
 }
 
 
@@ -88,7 +96,9 @@ func (ct *Controller) startWatcher() {
 
 func (ct *Controller) dealResult() {
 	go func() {
-		fmt.Println(<- ct.resultQueue)
+		for {
+			fmt.Println(<-ct.resultQueue)
+		}
 	}()
 }
 
@@ -136,30 +146,32 @@ func (ct *Controller) reloadAllJobs() {
 
 	for id, configString := range addList {
 		fmt.Println("Add: " + id)
-		j, err := createJobObj(id, configString)
+		j, err := ct.createJobObj(id, configString)
 		if err != nil {
 			log.Errorf("ERROR: create %s's job failed\n", id, err.Error())
 		} else {
 			ct.jobs[id] = j
-			go startJob(j, ct.resultQueue)
+			go j.start()
 		}
 	}
 
 	for id, configString := range updateList {
 		fmt.Println("Update: " + id)
-		j, err := createJobObj(id, configString)
+		j, err := ct.createJobObj(id, configString)
 		if err != nil {
 			log.Errorf("ERROR: create %s's job failed\n", id, err.Error())
 		} else {
-			stopJob( ct.jobs[id] )
+			//stopJob( ct.jobs[id] )
+			ct.jobs[id].stop()
 			ct.jobs[id] = j
-			go startJob(j, ct.resultQueue)
+			go j.start()
 		}
 	}
 
 	for id := range delList {
 		fmt.Println("Del: " + id)
-		stopJob( ct.jobs[id] )
+		//stopJob( ct.jobs[id] )
+		ct.jobs[id].stop()
 		delete(ct.jobs, id)
 	}
 
@@ -167,7 +179,7 @@ func (ct *Controller) reloadAllJobs() {
 		fmt.Println("Check: " + id)
 		j := ct.jobs[id]
 		if j.jobInterval > 0  &&  j.status == "stopped" {
-			go startJob(j, ct.resultQueue)
+			go j.start()
 		}
 	}
 
@@ -193,7 +205,7 @@ func (ct *Controller) reloadAllJobs() {
 
 
 
-func createJobObj(id string, configString string) (*Job, error) {
+func (ct *Controller) createJobObj(id string, configString string) (*Job, error) {
 
 	v := viper.New()
 
@@ -224,6 +236,7 @@ func createJobObj(id string, configString string) (*Job, error) {
 		jobInterval: jobInterval,
 		starttime: time.Now(),
 		mesg: make(chan string, 1),
+		result: ct.resultQueue,
 		configString: configString,
 		config: v,
 		executiveEntity: plugin,
@@ -234,19 +247,20 @@ func createJobObj(id string, configString string) (*Job, error) {
 
 
 
-//stopJob 并不会立即结束j，它会等待 time.Sleep(jobInterval)：
-func stopJob(j *Job) {
+//stopJob 并不会立即结束j，它会等待 time.Sleep(jobInterval)
+func (j *Job)stop(){
 	j.mesg <- "exit"
 }
 
-func startJob(j *Job, resultQueue chan interface{}) {
+
+func (j *Job)start() {
 	defer func() {
 		j.status = "stopped"
 	}()
 	j.status = "running"
 
 	excutePool := make(chan int, 3)
-Loop:
+	Loop:
 	for {
 		select {
 		case m := <- j.mesg:
@@ -255,7 +269,7 @@ Loop:
 				fmt.Println("job " + j.id + " get stop signal")
 				break Loop
 			}
-			default:
+		default:
 		}
 
 		//之所以这样单独起一个 goroutine ，是为了保证时间间隔的准确性
@@ -276,8 +290,11 @@ Loop:
 			select {
 			case exeP <- 1:
 				isRunning = true
-				//job.executiveEntity.Do()
-				resultQueue <- job.executiveEntity.Do()
+				if job.result == nil {
+					job.executiveEntity.Do()
+				} else {
+					job.result <- job.executiveEntity.Do()
+				}
 			default:
 				isRunning = false
 			}
@@ -290,7 +307,6 @@ Loop:
 		}
 	}
 }
-
 
 
 
@@ -327,13 +343,13 @@ func (ct *Controller) AddJob(id string, configString string)  (interface{}, erro
 			return nil, errors.New("job[" + id + "] has exists，but config is not equal：\n" + "old:\n" + job.configString + "\nnew:\n" + configString)
 		}
 	} else {
-		j, err := createJobObj(id, configString)
+		j, err := ct.createJobObj(id, configString)
 		if err != nil {
 			log.Errorf("ERROR: create %s's job failed: %s\n", id, err.Error())
 			return nil, errors.New(fmt.Sprintf("ERROR: create %s's job failed: %s\n", id, err.Error()))
 		} else {
 			ct.jobs[id] = j
-			go startJob(j, ct.resultQueue)
+			go j.start()
 		}
 
 		defer ct.config.mux.Unlock()
@@ -357,7 +373,8 @@ func (ct *Controller) DelJob(id string) (interface{}, error) {
 	var result interface{}
 
 	if ok {
-		stopJob(job)
+		//stopJob(job)
+		job.stop()
 		result = job.config.AllSettings()
 		delete(ct.config.configs, id)
 		delete(ct.jobs, id)
@@ -378,14 +395,15 @@ func (ct *Controller) UpdateJob(id string, configString string) (interface{}, er
 		if job.configString == configString {
 			return job.config.AllSettings(), nil
 		} else {
-			j, err := createJobObj(id, configString)
+			j, err := ct.createJobObj(id, configString)
 			if err != nil {
 				log.Errorf("ERROR: create %s's job failed: %s\n", id, err.Error())
 				return nil, errors.New(fmt.Sprintf("ERROR: create %s's job failed: %s\n", id, err.Error()))
 			} else {
-				stopJob( ct.jobs[id] )
+				//stopJob( ct.jobs[id] )
+				ct.jobs[id].stop()
 				ct.jobs[id] = j
-				go startJob(j, ct.resultQueue)
+				go j.start()
 			}
 
 			defer ct.config.mux.Unlock()
