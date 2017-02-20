@@ -161,7 +161,6 @@ func (ct *Controller) reloadAllJobs() {
 		if err != nil {
 			log.Errorf("ERROR: create %s's job failed\n", id, err.Error())
 		} else {
-			//stopJob( ct.jobs[id] )
 			ct.jobs[id].stop()
 			ct.jobs[id] = j
 			go j.start()
@@ -170,7 +169,6 @@ func (ct *Controller) reloadAllJobs() {
 
 	for id := range delList {
 		fmt.Println("Del: " + id)
-		//stopJob( ct.jobs[id] )
 		ct.jobs[id].stop()
 		delete(ct.jobs, id)
 	}
@@ -247,7 +245,7 @@ func (ct *Controller) createJobObj(id string, configString string) (*Job, error)
 
 
 
-//stopJob 并不会立即结束j，它会等待 time.Sleep(jobInterval)
+//stop 并不会立即结束j，它会等待 time.Sleep(jobInterval)
 func (j *Job)stop(){
 	j.mesg <- "exit"
 }
@@ -308,7 +306,14 @@ func (j *Job)start() {
 	}
 }
 
+func (j *Job) getCurrentStat() (stat map[string]interface{}){
 
+	stat = map[string]interface{} {
+		"status" : j.status,
+		"config" : j.config.AllSettings(),
+	}
+	return stat
+}
 
 
 func (ct *Controller) GetInstanceTotal() uint {
@@ -326,7 +331,7 @@ func (ct *Controller) GetConfig() map[string]interface{} {
 	return ct.config.configs
 }
 
-func (ct *Controller) AddJob(id string, configString string)  (interface{}, error) {
+func (ct *Controller) AddJob(id string, configString string)  (map[string]interface{}, error) {
 
 	defer ct.jobsMutex.Unlock()
 	ct.jobsMutex.Lock()
@@ -337,7 +342,7 @@ func (ct *Controller) AddJob(id string, configString string)  (interface{}, erro
 		//这里的判断其实是过于严厉了
 		//例如：两个json string，只是顺序不一样，这样配置实际上是一样的，但这里会被认为是不一样
 		if job.configString == configString {
-			return job.config.AllSettings(), nil
+			return job.getCurrentStat(), nil
 		} else {
 			log.Errorf("job[" + id + "] has exists，but config is not equal：\n" + "old:\n" + job.configString + "\nnew:\n" + configString)
 			return nil, errors.New("job[" + id + "] has exists，but config is not equal：\n" + "old:\n" + job.configString + "\nnew:\n" + configString)
@@ -358,11 +363,11 @@ func (ct *Controller) AddJob(id string, configString string)  (interface{}, erro
 		ct.config.configs[id] = j.config.AllSettings()
 		ct.config.changeTime = time.Now()
 
-		return ct.config.configs[id], nil
+		return j.getCurrentStat(), nil
 	}
 }
 
-func (ct *Controller) DelJob(id string) (interface{}, error) {
+func (ct *Controller) DelJob(id string) (map[string]interface{}, error) {
 	defer ct.config.mux.Unlock()
 	ct.config.mux.Lock()
 	defer ct.jobsMutex.Unlock()
@@ -370,21 +375,22 @@ func (ct *Controller) DelJob(id string) (interface{}, error) {
 
 	job, ok := ct.jobs[id]
 
-	var result interface{}
+	var result map[string]interface{}
 
 	if ok {
-		//stopJob(job)
 		job.stop()
-		result = job.config.AllSettings()
+		result = job.getCurrentStat()
 		delete(ct.config.configs, id)
 		delete(ct.jobs, id)
 
+	} else {
+		result = make(map[string]interface{})
 	}
 
 	return result, nil
 }
 
-func (ct *Controller) UpdateJob(id string, configString string) (interface{}, error) {
+func (ct *Controller) UpdateJob(id string, configString string) (map[string]interface{}, error) {
 
 	defer ct.jobsMutex.Unlock()
 	ct.jobsMutex.Lock()
@@ -393,14 +399,13 @@ func (ct *Controller) UpdateJob(id string, configString string) (interface{}, er
 
 	if ok {
 		if job.configString == configString {
-			return job.config.AllSettings(), nil
+			return job.getCurrentStat(), nil
 		} else {
 			j, err := ct.createJobObj(id, configString)
 			if err != nil {
 				log.Errorf("ERROR: create %s's job failed: %s\n", id, err.Error())
 				return nil, errors.New(fmt.Sprintf("ERROR: create %s's job failed: %s\n", id, err.Error()))
 			} else {
-				//stopJob( ct.jobs[id] )
 				ct.jobs[id].stop()
 				ct.jobs[id] = j
 				go j.start()
@@ -412,7 +417,7 @@ func (ct *Controller) UpdateJob(id string, configString string) (interface{}, er
 			ct.config.configs[id] = j.config.AllSettings()
 			ct.config.changeTime = time.Now()
 
-			return ct.config.configs[id], nil
+			return j.getCurrentStat(), nil
 
 		}
 	} else {
@@ -421,22 +426,28 @@ func (ct *Controller) UpdateJob(id string, configString string) (interface{}, er
 	}
 }
 
-func (ct *Controller) GetJob(id string) interface{} {
-	defer ct.config.mux.RUnlock()
-	ct.config.mux.RLock()
-	return ct.config.configs[id]
+func (ct *Controller) GetJob(id string) (result map[string]interface{}) {
+
+	result = make(map[string]interface{})
+	if j, ok := ct.jobs[id]; ok {
+		result[id] = j.getCurrentStat()
+	}
+	return result
 }
 
-func (ct *Controller) GetAllJob() map[string]interface{} {
-	defer ct.config.mux.RUnlock()
-	ct.config.mux.RLock()
-	return ct.config.configs
+func (ct *Controller) GetAllJob() (result map[string]interface{}) {
+
+	result = make(map[string]interface{})
+	for id, j := range ct.jobs {
+		result[id] = j.getCurrentStat()
+	}
+	return result
 }
 
 
 func (ct *Controller) ReloadAllJobs() map[string]interface{} {
 	ct.reloadAllJobs()
-	return ct.config.configs
+	return ct.GetAllJob()
 }
 
 
