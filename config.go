@@ -2,7 +2,10 @@ package heca
 
 import (
 	"io/ioutil"
-	"log"
+	log "github.com/cihub/seelog"
+	"fmt"
+	"encoding/json"
+	"errors"
 )
 
 func getConfig() (total uint, seq uint, configs map[string]string){
@@ -33,7 +36,8 @@ func getConfig() (total uint, seq uint, configs map[string]string){
 
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err)
+		return
 	}
 
 	configs = make(map[string]string)
@@ -47,12 +51,48 @@ func getConfig() (total uint, seq uint, configs map[string]string){
 		result, err := ioutil.ReadFile(filePath)
 
 		if err != nil {
-			panic(err)
+			log.Error(err)
+			continue
 		}
 
 		//fmt.Println(string(result))
+		configContent, err := RearrangeJson(result)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+		configs[file.Name()] = configContent
+	}
 
-		configs[file.Name()] = string(result)
+	return
+}
+
+
+func RearrangeJson(i interface{})(rearrangedJsonString string, err error) {
+
+	var rearrangedJsonBytes []byte
+
+	switch inputObject := i.(type) {
+	case map[string]interface{}:
+		rearrangedJsonBytes, err = json.Marshal(inputObject)
+	case string:
+		tmpMap := make(map[string]interface{})
+		err = json.Unmarshal([]byte(inputObject), &tmpMap)
+		if err == nil {
+			rearrangedJsonBytes, err = json.Marshal(tmpMap)
+		}
+	case []byte:
+		tmpMap := make(map[string]interface{})
+		err = json.Unmarshal(inputObject, &tmpMap)
+		if err == nil {
+			rearrangedJsonBytes, err = json.Marshal(tmpMap)
+		}
+	default:
+		err = errors.New(fmt.Sprintf("type %T is not supported", inputObject))
+	}
+
+	if rearrangedJsonBytes != nil {
+		rearrangedJsonString = string(rearrangedJsonBytes)
 	}
 
 	return

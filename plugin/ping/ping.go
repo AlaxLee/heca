@@ -12,7 +12,7 @@ import (
 	"errors"
 	"encoding/binary"
 	"strconv"
-	"log"
+	log "github.com/cihub/seelog"
 	"github.com/spf13/viper"
 )
 
@@ -222,7 +222,7 @@ func keepDecimalPlacesOnFloat64(value float64, n uint) float64{
 	format := fmt.Sprintf("%%.%df", n)
 	result, err := strconv.ParseFloat( fmt.Sprintf(format, value), 64 )
 	if err != nil {
-		log.Println(err)
+		log.Warn(err)
 		result = value
 	}
 

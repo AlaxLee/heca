@@ -10,6 +10,7 @@ import (
 	"fmt"
 )
 
+
 type Controller struct {
 	config Config   //只起记录作用
 	enableWatcher bool //是否使自动监听生效
@@ -33,11 +34,12 @@ type Job struct {
 	id              string
 	status          string       //avaliable, running, stopped
 
-	jobType         string       //这个值用来做JobDo的类型名字
+	jobType         string       //这个值用来做executiveEntity的类型标识
 	jobInterval     int          //执行周期，小于0或等于0 表示无周期
 
 	starttime       time.Time    //任务的开始时间
 	mesg            chan string  //任务的控制信息
+	excutePool	chan int     //用于控制任务最多同时存在的个数
 
 	result		chan<- interface{}  //任务的结果反馈
 
@@ -234,6 +236,7 @@ func (ct *Controller) createJobObj(id string, configString string) (*Job, error)
 		jobInterval: jobInterval,
 		starttime: time.Now(),
 		mesg: make(chan string, 1),
+		excutePool: make(chan int, 3),
 		result: ct.resultQueue,
 		configString: configString,
 		config: v,
@@ -257,7 +260,6 @@ func (j *Job)start() {
 	}()
 	j.status = "running"
 
-	excutePool := make(chan int, 3)
 	Loop:
 	for {
 		select {
@@ -273,7 +275,7 @@ func (j *Job)start() {
 		//之所以这样单独起一个 goroutine ，是为了保证时间间隔的准确性
 		//但是，如果这个 goroutine 不能迅速结束，那么 goroutine 会越来越多……
 		//所以专门用了一个 chain 做限制
-		go func(job *Job, exeP chan int) {
+		go func(job *Job) {
 			var isRunning bool
 			defer func(ep chan int) {
 				if isRunning {
@@ -283,10 +285,10 @@ func (j *Job)start() {
 						log.Error("ERROR: this should not happened")
 					}
 				}
-			}(exeP)
+			}(job.excutePool)
 
 			select {
-			case exeP <- 1:
+			case job.excutePool <- 1:
 				isRunning = true
 				if job.result == nil {
 					job.executiveEntity.Do()
@@ -294,9 +296,10 @@ func (j *Job)start() {
 					job.result <- job.executiveEntity.Do()
 				}
 			default:
+				job.status = "blocking"
 				isRunning = false
 			}
-		}(j, excutePool)
+		}(j)
 
 		if j.jobInterval > 0 {
 			time.Sleep( time.Duration(j.jobInterval)*time.Second )
@@ -331,7 +334,19 @@ func (ct *Controller) GetConfig() map[string]interface{} {
 	return ct.config.configs
 }
 
-func (ct *Controller) AddJob(id string, configString string)  (map[string]interface{}, error) {
+func (ct *Controller) AddJob(id string, originConfigString string)  (map[string]interface{}, error) {
+
+	configString, err := RearrangeJson(originConfigString)
+	if err != nil {
+		log.Errorf("ERROR: rearrange %s's config failed: %s\n", id, err.Error())
+		return nil, errors.New(fmt.Sprintf("ERROR: rearrange %s's config failed: %s\n", id, err.Error()))
+	}
+
+	j, err := ct.createJobObj(id, configString)
+	if err != nil {
+		log.Errorf("ERROR: create %s's job failed: %s\n", id, err.Error())
+		return nil, errors.New(fmt.Sprintf("ERROR: create %s's job failed: %s\n", id, err.Error()))
+	}
 
 	defer ct.jobsMutex.Unlock()
 	ct.jobsMutex.Lock()
@@ -339,23 +354,15 @@ func (ct *Controller) AddJob(id string, configString string)  (map[string]interf
 	job, ok := ct.jobs[id]
 
 	if ok {
-		//这里的判断其实是过于严厉了
-		//例如：两个json string，只是顺序不一样，这样配置实际上是一样的，但这里会被认为是不一样
-		if job.configString == configString {
-			return job.getCurrentStat(), nil
+		if job.configString != configString {
+			log.Errorf("job[" + id + "] has exists，but is not equal: \n" + job.configString + "\n" + configString + "\n" )
+			return nil, errors.New("job[" + id + "] has exists，but config is not equal")
 		} else {
-			log.Errorf("job[" + id + "] has exists，but config is not equal：\n" + "old:\n" + job.configString + "\nnew:\n" + configString)
-			return nil, errors.New("job[" + id + "] has exists，but config is not equal：\n" + "old:\n" + job.configString + "\nnew:\n" + configString)
+			return job.getCurrentStat(), nil
 		}
 	} else {
-		j, err := ct.createJobObj(id, configString)
-		if err != nil {
-			log.Errorf("ERROR: create %s's job failed: %s\n", id, err.Error())
-			return nil, errors.New(fmt.Sprintf("ERROR: create %s's job failed: %s\n", id, err.Error()))
-		} else {
-			ct.jobs[id] = j
-			go j.start()
-		}
+		ct.jobs[id] = j
+		go j.start()
 
 		defer ct.config.mux.Unlock()
 		ct.config.mux.Lock()
@@ -364,6 +371,7 @@ func (ct *Controller) AddJob(id string, configString string)  (map[string]interf
 		ct.config.changeTime = time.Now()
 
 		return j.getCurrentStat(), nil
+
 	}
 }
 
@@ -390,40 +398,50 @@ func (ct *Controller) DelJob(id string) (map[string]interface{}, error) {
 	return result, nil
 }
 
-func (ct *Controller) UpdateJob(id string, configString string) (map[string]interface{}, error) {
+func (ct *Controller) UpdateJob(id string, originConfigString string) (map[string]interface{}, error) {
+
+	configString, err := RearrangeJson(originConfigString)
+	if err != nil {
+		log.Errorf("ERROR: rearrange %s's config failed: %s\n", id, err.Error())
+		return nil, errors.New(fmt.Sprintf("ERROR: rearrange %s's config failed: %s\n", id, err.Error()))
+	}
+
+
+	j, err := ct.createJobObj(id, configString)
+	if err != nil {
+		log.Errorf("ERROR: create %s's job failed: %s\n", id, err.Error())
+		return nil, errors.New(fmt.Sprintf("ERROR: create %s's job failed: %s\n", id, err.Error()))
+	}
 
 	defer ct.jobsMutex.Unlock()
 	ct.jobsMutex.Lock()
 
 	job, ok := ct.jobs[id]
 
-	if ok {
-		if job.configString == configString {
-			return job.getCurrentStat(), nil
-		} else {
-			j, err := ct.createJobObj(id, configString)
-			if err != nil {
-				log.Errorf("ERROR: create %s's job failed: %s\n", id, err.Error())
-				return nil, errors.New(fmt.Sprintf("ERROR: create %s's job failed: %s\n", id, err.Error()))
-			} else {
-				ct.jobs[id].stop()
-				ct.jobs[id] = j
-				go j.start()
-			}
-
-			defer ct.config.mux.Unlock()
-			ct.config.mux.Lock()
-
-			ct.config.configs[id] = j.config.AllSettings()
-			ct.config.changeTime = time.Now()
-
-			return j.getCurrentStat(), nil
-
-		}
-	} else {
+	if !ok {
 		log.Errorf("job[" + id + "] has not exists")
 		return nil, errors.New("job[" + id + "] has not exists")
 	}
+
+
+
+	if job.configString != configString {
+		job.stop()
+		ct.jobs[id] = j
+		go j.start()
+
+		defer ct.config.mux.Unlock()
+		ct.config.mux.Lock()
+
+		ct.config.configs[id] = j.config.AllSettings()
+		ct.config.changeTime = time.Now()
+
+		return j.getCurrentStat(), nil
+
+	} else {
+		return job.getCurrentStat(), nil
+	}
+
 }
 
 func (ct *Controller) GetJob(id string) (result map[string]interface{}) {
