@@ -1,14 +1,18 @@
 package heca
 
 import (
-	"io/ioutil"
 	log "github.com/cihub/seelog"
 	"fmt"
 	"encoding/json"
 	"errors"
+	"regexp"
+	"os"
+	"bufio"
 )
 
-func getConfig() (total uint, seq uint, configs map[string]string){
+
+
+func getJobConfig() (total uint, seq uint, configs map[string]string){
 
 	total = 2
 	seq = 1
@@ -32,38 +36,53 @@ func getConfig() (total uint, seq uint, configs map[string]string){
 	//	}`,
 	//}
 
-	dir := "/Users/user/IdeaProjects/Hecatoncheires/conf"
+	configs = make(map[string]string)
 
-	files, err := ioutil.ReadDir(dir)
+
+	configFilePath := Home + "/conf/hostlist"
+
+	blankRegx, err := regexp.Compile("\\s+")
 	if err != nil {
 		log.Error(err)
 		return
 	}
 
-	configs = make(map[string]string)
-	
-	for _, file := range files {
-		//fmt.Println(file.Name())
-		//fmt.Printf("%T\n", file)
 
-		filePath := dir + "/" + file.Name()
-
-		result, err := ioutil.ReadFile(filePath)
-
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-
-		//fmt.Println(string(result))
-		configContent, err := RearrangeJson(result)
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-		configs[file.Name()] = configContent
+	f, err := os.Open(configFilePath)
+	if err != nil {
+		log.Error(err)
+		return
 	}
+	defer f.Close()
 
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		info := blankRegx.Split(s.Text(), 2)
+		if len(info) != 2 {
+			log.Info(info)
+			continue
+		}
+		jobId := info[0]
+		address := info[1]
+
+		jobInfo := map[string]interface{} {
+			"endpoint": jobId,
+			"jobType": "ping",
+			"jobInterval" : 60,
+			"address": address,
+			"timeout": 3,
+			"retry": 3,
+		}
+
+		configContent, err := RearrangeJson(jobInfo)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+
+		configs[jobId] = configContent
+
+	}
 	return
 }
 

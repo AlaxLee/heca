@@ -15,7 +15,7 @@ import (
 //}
 
 type plugin interface {
-	Do() interface{}
+	Do(chan<- interface{})
 }
 
 func NewPlugin(pluginType string, config *viper.Viper) (plugin plugin, err error) {

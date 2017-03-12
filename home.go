@@ -5,7 +5,30 @@ import (
 	"os"
 )
 
-var Home string
+
+
+
+
+
+type PushConfig struct {
+}
+
+
+type GlobalConfig struct {
+}
+
+
+
+var (
+	Home         string
+	globalConfig *GlobalConfig
+)
+
+func GetGlobalConfig() *GlobalConfig {
+
+	return globalConfig
+}
+
 
 func init() {
 	home, err := filepath.Abs(filepath.Dir(os.Args[0]) + "/../")

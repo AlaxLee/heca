@@ -26,7 +26,7 @@ type Config struct {
 	seq uint	//本 controller 的编号
 
 	mux *sync.RWMutex
-	configs map[string]interface{}   //这里 map 的 key 是 Job.id
+	jobConfigs map[string]interface{}   //这里 map 的 key 是 Job.id，用于快速比对新老job是否一致
 	changeTime time.Time
 }
 
@@ -54,7 +54,7 @@ func NewController() *Controller {
 	ct := &Controller{
 		config: Config{
 			mux: &sync.RWMutex{},
-			configs: make(map[string]interface{}),
+			jobConfigs: make(map[string]interface{}),
 			changeTime: time.Now(),
 		},
 		resultQueue: make(chan interface{}, 5 * 1000 * 1000),
@@ -97,11 +97,7 @@ func (ct *Controller) startWatcher() {
 }
 
 func (ct *Controller) dealResult() {
-	go func() {
-		for {
-			fmt.Println(<-ct.resultQueue)
-		}
-	}()
+	go SendToArgus(ct.resultQueue)
 }
 
 func (ct *Controller) startAPI() {
@@ -112,9 +108,9 @@ func (ct *Controller) startAPI() {
 
 
 func (ct *Controller) reloadAllJobs() {
-	total, seq, configs := getConfig()
+	total, seq, jobConfigs:= getJobConfig()
 
-	//对比当前的 ct.configs 和 新得到的 configs，然后新增的Add，有变化的Update，减少的Del，未变化的检查running状态
+	//对比当前的 ct.jobConfigs 和 新得到的 jogConfigs，然后新增的Add，有变化的Update，减少的Del，未变化的检查running状态
 	addList := make(map[string]string)
 	updateList := make(map[string]string)
 	delList := make(map[string]string)
@@ -129,7 +125,7 @@ func (ct *Controller) reloadAllJobs() {
 		delList[oldId] = ""
 	}
 
-	for newId, newConfigString := range configs {
+	for newId, newConfigString := range jobConfigs {
 		job, ok := ct.jobs[newId]
 		if ok {
 			if newConfigString != job.configString {
@@ -189,10 +185,10 @@ func (ct *Controller) reloadAllJobs() {
 	ct.config.total = total
 	ct.config.seq = seq
 
-	ct.config.configs = make(map[string]interface{})
+	ct.config.jobConfigs = make(map[string]interface{})
 	for id, j := range ct.jobs {
-		ct.config.configs[id] = j.config.AllSettings()
-		//err := json.Unmarshal([]bytes(j.configString), ct.config.configs[id])
+		ct.config.jobConfigs[id] = j.config.AllSettings()
+		//err := json.Unmarshal([]bytes(j.configString), ct.config.jobConfigs[id])
 		//if err != nil {
 		//	log.Errorf("ERROR: unmarshal %s's job configString failed\n", j.id, err.Error())
 		//	continue
@@ -290,11 +286,14 @@ func (j *Job)start() {
 			select {
 			case job.excutePool <- 1:
 				isRunning = true
+				job.executiveEntity.Do(j.result)
+/*
 				if job.result == nil {
 					job.executiveEntity.Do()
 				} else {
 					job.result <- job.executiveEntity.Do()
 				}
+*/
 			default:
 				job.status = "blocking"
 				isRunning = false
@@ -331,7 +330,7 @@ func (ct *Controller) GetConfig() map[string]interface{} {
 
 	defer ct.config.mux.RUnlock()
 	ct.config.mux.RLock()
-	return ct.config.configs
+	return ct.config.jobConfigs
 }
 
 func (ct *Controller) AddJob(id string, originConfigString string)  (map[string]interface{}, error) {
@@ -367,7 +366,7 @@ func (ct *Controller) AddJob(id string, originConfigString string)  (map[string]
 		defer ct.config.mux.Unlock()
 		ct.config.mux.Lock()
 
-		ct.config.configs[id] = j.config.AllSettings()
+		ct.config.jobConfigs[id] = j.config.AllSettings()
 		ct.config.changeTime = time.Now()
 
 		return j.getCurrentStat(), nil
@@ -388,7 +387,7 @@ func (ct *Controller) DelJob(id string) (map[string]interface{}, error) {
 	if ok {
 		job.stop()
 		result = job.getCurrentStat()
-		delete(ct.config.configs, id)
+		delete(ct.config.jobConfigs, id)
 		delete(ct.jobs, id)
 
 	} else {
@@ -433,7 +432,7 @@ func (ct *Controller) UpdateJob(id string, originConfigString string) (map[strin
 		defer ct.config.mux.Unlock()
 		ct.config.mux.Lock()
 
-		ct.config.configs[id] = j.config.AllSettings()
+		ct.config.jobConfigs[id] = j.config.AllSettings()
 		ct.config.changeTime = time.Now()
 
 		return j.getCurrentStat(), nil

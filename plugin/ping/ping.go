@@ -18,27 +18,31 @@ import (
 
 
 type pingResult struct {
-	available bool
+	available int //1 表示 true, 0 表示 false
 	delay float64 //单位 秒
 	loss float64
 	err error
 }
 
 type MyPing struct {
-	address string
-	timeout int
-	retry int
-	result pingResult
+	endpoint string
+	interval int
+	address  string
+	timeout  int
+	retry    int
+	result   pingResult
 }
 
 func NewMyPing(config *viper.Viper) (*MyPing, error){
+	endpoint := config.GetString("endpoint")
+	interval := config.GetInt("jobInterval")
 	address := config.GetString("address")
 	timeout := config.GetInt("timeout")
 	retry   := config.GetInt("retry")
 
 	//fmt.Println(address, timeout, retry)
 
-	return &MyPing{address: address, timeout: timeout, retry: retry, result: pingResult{}}, nil
+	return &MyPing{endpoint: endpoint, interval: interval, address: address, timeout: timeout, retry: retry, result: pingResult{}}, nil
 }
 
 
@@ -48,13 +52,13 @@ func NewMyPing(config *viper.Viper) (*MyPing, error){
 //	err:       记录每个 ping 失败的原因
 //	delay:     只有 ping 通的延迟参与到最终 delay 计算，单位 秒，0 表示都 ping 不通
 //	loss:      ping 不通 除以 retry，值小于1，保留4位小数
-func (p *MyPing) Do() interface{} {
+func (p *MyPing) Do(outChan chan<- interface{}) {
 
 	var delay float64
 	var num int
 	var errString string
 
-	p.result.available = false
+	p.result.available = 0
 	p.result.delay = 0
 	p.result.loss = 0
 	p.result.err = nil
@@ -68,7 +72,7 @@ func (p *MyPing) Do() interface{} {
 		if e != nil {
 			errString += e.Error() + "\n"
 		} else {
-			p.result.available = true
+			p.result.available = 1
 		}
 	}
 
@@ -80,23 +84,46 @@ func (p *MyPing) Do() interface{} {
 		p.result.delay = delay/float64(num)
 	}
 
-	p.result.loss = float64((p.retry - num)) / float64(p.retry)
+	p.result.loss = float64((p.retry - num)) * 100/ float64(p.retry)
 	p.result.loss = keepDecimalPlacesOnFloat64(p.result.loss, 4)
 
-	p.result.delay = keepDecimalPlacesOnFloat64(p.result.delay, 9)
+	p.result.delay = keepDecimalPlacesOnFloat64(p.result.delay, 3)
 
-	p.echoResult()
+	log.Debugf("ping %s(%s):   available: %d, delay: %.3f, loss: %.2f, err: %s\n", p.endpoint, p.address, p.result.available, p.result.delay, p.result.loss, p.result.err)
 
-	return fmt.Sprint(time.Now().Second(), p.address, p.result.available, p.result.delay, p.result.loss, p.result.err)
+	outChan <- map[string]interface{} {
+		"endpoint": p.endpoint,
+		"metric": "ping.available",
+		"timestamp": time.Now().Unix(),
+		"step": p.interval,
+		"value": p.result.available,
+		"counterType": "GAUGE",
+		"tags": "",
+	}
 
-}
+	outChan <- map[string]interface{} {
+		"endpoint": p.endpoint,
+		"metric": "ping.delay",
+		"timestamp": time.Now().Unix(),
+		"step": p.interval,
+		"value": p.result.delay,
+		"counterType": "GAUGE",
+		"tags": "unit=second",
+	}
 
-func (p *MyPing) echoResult() {
+	outChan <- map[string]interface{} {
+		"endpoint": p.endpoint,
+		"metric": "ping.loss",
+		"timestamp": time.Now().Unix(),
+		"step": p.interval,
+		"value": p.result.loss,
+		"counterType": "GAUGE",
+		"tags": "unit=percent",
+	}
 
-	fmt.Println(time.Now().Second(), p.address, p.result.available, p.result.delay, p.result.loss, p.result.err)
-	//time.Sleep( 60 *  time.Second )
 
-	return
+	//outChan <- fmt.Sprint(time.Now().Second(), p.address, p.result.available, p.result.delay, p.result.loss, p.result.err)
+
 }
 
 
