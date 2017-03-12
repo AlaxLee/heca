@@ -1,6 +1,6 @@
 .idea
-tool/hecaserve
-tool/l[aeiou]l[aeiou].go
+bin/hecaserve
+bin/l[aeiou]l[aeiou].go
 *.iml
 conf
 pkg
