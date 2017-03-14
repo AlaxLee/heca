@@ -7,11 +7,17 @@ import (
 
 func main() {
 
-        err := heca.InitLogger()
+	var err error
 
+        err = heca.InitLogger()
         if err != nil {
                 panic(err)
         }
+
+	err = heca.InitConfig()
+	if err != nil {
+		panic(err)
+	}
 
 
 	c := heca.NewController()

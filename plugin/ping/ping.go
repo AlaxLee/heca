@@ -52,7 +52,7 @@ func NewMyPing(config *viper.Viper) (*MyPing, error){
 //	err:       记录每个 ping 失败的原因
 //	delay:     只有 ping 通的延迟参与到最终 delay 计算，单位 秒，0 表示都 ping 不通
 //	loss:      ping 不通 除以 retry，值小于1，保留4位小数
-func (p *MyPing) Do(outChan chan<- interface{}) {
+func (p *MyPing) Do(resultChan chan<- interface{}) {
 
 	var delay float64
 	var num int
@@ -91,7 +91,7 @@ func (p *MyPing) Do(outChan chan<- interface{}) {
 
 	log.Debugf("ping %s(%s):   available: %d, delay: %.3f, loss: %.2f, err: %s\n", p.endpoint, p.address, p.result.available, p.result.delay, p.result.loss, p.result.err)
 
-	outChan <- map[string]interface{} {
+	resultChan <- map[string]interface{} {
 		"endpoint": p.endpoint,
 		"metric": "ping.available",
 		"timestamp": time.Now().Unix(),
@@ -101,7 +101,7 @@ func (p *MyPing) Do(outChan chan<- interface{}) {
 		"tags": "",
 	}
 
-	outChan <- map[string]interface{} {
+	resultChan <- map[string]interface{} {
 		"endpoint": p.endpoint,
 		"metric": "ping.delay",
 		"timestamp": time.Now().Unix(),
@@ -111,7 +111,7 @@ func (p *MyPing) Do(outChan chan<- interface{}) {
 		"tags": "unit=second",
 	}
 
-	outChan <- map[string]interface{} {
+	resultChan <- map[string]interface{} {
 		"endpoint": p.endpoint,
 		"metric": "ping.loss",
 		"timestamp": time.Now().Unix(),
@@ -120,9 +120,6 @@ func (p *MyPing) Do(outChan chan<- interface{}) {
 		"counterType": "GAUGE",
 		"tags": "unit=percent",
 	}
-
-
-	//outChan <- fmt.Sprint(time.Now().Second(), p.address, p.result.available, p.result.delay, p.result.loss, p.result.err)
 
 }
 

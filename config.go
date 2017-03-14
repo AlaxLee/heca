@@ -8,7 +8,90 @@ import (
 	"regexp"
 	"os"
 	"bufio"
+	"github.com/spf13/viper"
+	"io/ioutil"
+	"sync"
+	"path/filepath"
 )
+
+
+
+type ControllerConfig struct {
+	ResultQueueLength  int   `json:"resultQueueLength"`     //结果存放队列
+	WatcherEnabled     bool  `json:"watcherEnabled"`        //是否使自动监听生效
+	WatcherInterval    int   `json:"watcherInterval"`       //自动监听的检查的时间间隔
+								//Total int  `json:"total"`
+								//Seq   int  `json:"seq"`
+}
+
+type PushConfig struct {
+	Limit     int    `json:"limit"`     //推送一次的最大数量
+	TimeWait  int64  `json:"timewait"`  //推送一次的时间间隔
+	Retry     int    `json:"retry"`     //推送的重试次数
+	APIUrl    string `json:"apiUrl"`    //推送的接口
+}
+
+
+type GlobalConfig struct {
+	Push       *PushConfig        `json:"push"`
+	Controller *ControllerConfig  `json:"controller"`
+}
+
+
+var (
+	Home              string
+	globalConfig      *GlobalConfig
+	globalConfigLock  = new(sync.RWMutex)
+)
+
+func Config() *GlobalConfig {
+
+	defer globalConfigLock.RUnlock()
+	globalConfigLock.RLock()
+
+	return globalConfig
+}
+
+
+
+
+
+
+
+func init() {
+	home, err := filepath.Abs(filepath.Dir(os.Args[0]) + "/../")
+
+	if err != nil {
+		panic(err)
+	}
+	Home = home
+}
+
+func InitConfig()  error{
+	return ParseConfig(Home + "/conf/heca.json")
+}
+
+func ParseConfig(configFilePath string) error {
+	configContent, err := ioutil.ReadFile(configFilePath)
+	if err != nil {
+		return err
+	}
+
+	var c GlobalConfig
+	err = json.Unmarshal(configContent, &c)
+	if err != nil {
+		return err
+	}
+
+	globalConfigLock.Lock()
+	defer globalConfigLock.Unlock()
+
+	globalConfig = &c
+
+	log.Info("read config file: ", configFilePath, " successfully")
+	return nil
+}
+
 
 
 
@@ -92,6 +175,8 @@ func RearrangeJson(i interface{})(rearrangedJsonString string, err error) {
 	var rearrangedJsonBytes []byte
 
 	switch inputObject := i.(type) {
+	case *viper.Viper:
+		rearrangedJsonBytes, err = json.Marshal(inputObject.AllSettings())
 	case map[string]interface{}:
 		rearrangedJsonBytes, err = json.Marshal(inputObject)
 	case string:

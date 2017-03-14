@@ -12,52 +12,33 @@ import (
 
 
 type Controller struct {
-	config Config   //只起记录作用
-	enableWatcher bool //是否使自动监听生效
-	resultQueue chan interface{} //用于存放执行结果的队列
+	config        JobsConfig       //只起记录作用
+	resultQueue   chan interface{} //用于存放执行结果的队列
 
 
-	jobsMutex *sync.RWMutex
-	jobs map[string]*Job    //这里 map 的 key 是 Job.id
+	jobsMutex     *sync.RWMutex
+	jobs          map[string]*Job  //这里 map 的 key 是 Job.id
 }
 
-type Config struct {
-	total uint	//当前注册的 controller 总数量
-	seq uint	//本 controller 的编号
+type JobsConfig struct {
+	Total      uint                   //当前注册的 controller 总数量
+	Seq        uint                   //本 controller 的编号
 
-	mux *sync.RWMutex
-	jobConfigs map[string]interface{}   //这里 map 的 key 是 Job.id，用于快速比对新老job是否一致
+	mux        *sync.RWMutex
+	jobConfigs map[string]interface{} //这里 map 的 key 是 Job.id，用于快速比对新老job是否一致
 	changeTime time.Time
-}
-
-type Job struct {
-	id              string
-	status          string       //avaliable, running, stopped
-
-	jobType         string       //这个值用来做executiveEntity的类型标识
-	jobInterval     int          //执行周期，小于0或等于0 表示无周期
-
-	starttime       time.Time    //任务的开始时间
-	mesg            chan string  //任务的控制信息
-	excutePool	chan int     //用于控制任务最多同时存在的个数
-
-	result		chan<- interface{}  //任务的结果反馈
-
-	configString    string       //本job的配置，未曾解析过
-	config          *viper.Viper //本job的配置，已经解析过了
-	executiveEntity plugin       //具体执行体
 }
 
 
 func NewController() *Controller {
 
 	ct := &Controller{
-		config: Config{
+		config: JobsConfig{
 			mux: &sync.RWMutex{},
 			jobConfigs: make(map[string]interface{}),
 			changeTime: time.Now(),
 		},
-		resultQueue: make(chan interface{}, 5 * 1000 * 1000),
+		resultQueue: make(chan interface{}, Config().Controller.ResultQueueLength),
 		jobsMutex: &sync.RWMutex{},
 		jobs: make(map[string]*Job),
 	}
@@ -77,19 +58,19 @@ func (ct *Controller) Start() {
 	ct.startAPI()
 
 	//保持主进程活着
-	for {
-		time.Sleep( 5 * time.Second )
-	}
+	select {}
 }
 
 
 
 func (ct *Controller) startWatcher() {
+	watcherInterval := time.Duration(Config().Controller.WatcherInterval) * time.Second
+	watcherEnabled  := Config().Controller.WatcherEnabled
 	go func() {
 		ct.reloadAllJobs()
 		for {
-			time.Sleep( 60 * time.Second )
-			if ct.enableWatcher {
+			time.Sleep( watcherInterval )
+			if watcherEnabled {
 				ct.reloadAllJobs()
 			}
 		}
@@ -182,8 +163,8 @@ func (ct *Controller) reloadAllJobs() {
 	defer ct.config.mux.Unlock()
 	ct.config.mux.Lock()
 
-	ct.config.total = total
-	ct.config.seq = seq
+	ct.config.Total = total
+	ct.config.Seq = seq
 
 	ct.config.jobConfigs = make(map[string]interface{})
 	for id, j := range ct.jobs {
@@ -208,35 +189,13 @@ func (ct *Controller) createJobObj(id string, configString string) (*Job, error)
 	v.SetConfigType("json")
 
 	err := v.ReadConfig(bytes.NewBuffer( []byte(configString) ))
-
 	if err != nil {
 		return nil, errors.New("ERROR: parse " + id + "'s configString failed: " + err.Error())
 	}
 
-	jobType := v.GetString("jobType")
-	if jobType == "" {
-		return nil, errors.New("ERROR: " + id + "'s jobType is null")
-	}
-
-	jobInterval := v.GetInt("jobInterval")
-
-	plugin, err := NewPlugin(jobType, v)
+	j, err := NewJob(id, v, ct.resultQueue)
 	if err != nil {
-		return nil, err
-	}
-
-	j := &Job{
-		id: id,
-		status: "avaliable",
-		jobType: jobType,
-		jobInterval: jobInterval,
-		starttime: time.Now(),
-		mesg: make(chan string, 1),
-		excutePool: make(chan int, 3),
-		result: ct.resultQueue,
-		configString: configString,
-		config: v,
-		executiveEntity: plugin,
+		return nil, errors.New("ERROR: create job [" + id + "]'s object failed: " + err.Error())
 	}
 
 	return j, nil
@@ -244,86 +203,12 @@ func (ct *Controller) createJobObj(id string, configString string) (*Job, error)
 
 
 
-//stop 并不会立即结束j，它会等待 time.Sleep(jobInterval)
-func (j *Job)stop(){
-	j.mesg <- "exit"
-}
-
-
-func (j *Job)start() {
-	defer func() {
-		j.status = "stopped"
-	}()
-	j.status = "running"
-
-	Loop:
-	for {
-		select {
-		case m := <- j.mesg:
-			switch m {
-			case "exit":
-				fmt.Println("job " + j.id + " get stop signal")
-				break Loop
-			}
-		default:
-		}
-
-		//之所以这样单独起一个 goroutine ，是为了保证时间间隔的准确性
-		//但是，如果这个 goroutine 不能迅速结束，那么 goroutine 会越来越多……
-		//所以专门用了一个 chain 做限制
-		go func(job *Job) {
-			var isRunning bool
-			defer func(ep chan int) {
-				if isRunning {
-					select {
-					case <-ep:
-					default:
-						log.Error("ERROR: this should not happened")
-					}
-				}
-			}(job.excutePool)
-
-			select {
-			case job.excutePool <- 1:
-				isRunning = true
-				job.executiveEntity.Do(j.result)
-/*
-				if job.result == nil {
-					job.executiveEntity.Do()
-				} else {
-					job.result <- job.executiveEntity.Do()
-				}
-*/
-			default:
-				job.status = "blocking"
-				isRunning = false
-			}
-		}(j)
-
-		if j.jobInterval > 0 {
-			time.Sleep( time.Duration(j.jobInterval)*time.Second )
-		} else {
-			break
-		}
-	}
-}
-
-func (j *Job) getCurrentStat() (stat map[string]interface{}){
-
-	stat = map[string]interface{} {
-		"status" : j.status,
-		"config" : j.config.AllSettings(),
-	}
-	return stat
-}
-
-
 func (ct *Controller) GetInstanceTotal() uint {
-	return ct.config.total
+	return ct.config.Total
 }
 
 func (ct *Controller) GetInstanceSeq() uint {
-	return ct.config.seq
+	return ct.config.Seq
 }
 
 func (ct *Controller) GetConfig() map[string]interface{} {
