@@ -1,0 +1,8 @@
+<seelog minlevel="debug">
+	<outputs formatid="main">
+		<console />
+	</outputs>
+	<formats>
+		<format id="main" format="&lt;%Date(2006-01-02 15:04:05 -0700)&gt; [%Level] %Msg%n" />
+	</formats>
+</seelog>

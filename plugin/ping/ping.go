@@ -33,12 +33,31 @@ type MyPing struct {
 	result   pingResult
 }
 
+
 func NewMyPing(config *viper.Viper) (*MyPing, error){
 	endpoint := config.GetString("endpoint")
 	interval := config.GetInt("jobInterval")
 	address := config.GetString("address")
 	timeout := config.GetInt("timeout")
 	retry   := config.GetInt("retry")
+
+	var err error
+	if endpoint == "" {
+		err = errors.New("lack endpoint")
+	}
+	if address == "" {
+		err = errors.New("lack address")
+	}
+	if timeout <= 0 {
+		err = errors.New("timeout must bigger than 0")
+	}
+	if retry < 0 {
+		err = errors.New("retry must bigger than or equal to 0")
+	}
+
+	if err != nil {
+		return nil, err
+	}
 
 	//fmt.Println(address, timeout, retry)
 

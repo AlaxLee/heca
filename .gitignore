@@ -2,6 +2,8 @@
 bin/hecaserve
 bin/l[aeiou]l[aeiou].go
 *.iml
-conf
+conf/heca.json
+conf/hostlist
+conf/logger.xml
 pkg
 src

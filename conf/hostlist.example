@@ -1,0 +1,2 @@
+baidu  { "endpoint": "baidu", "address": "www.baidu.com",   "jobinterval": 15,   "jobtype": "ping",   "retry": 3,   "timeout": 3 }
+qidian { "endpoint": "qidian", "address": "www.qidian.com",   "jobinterval": 15,   "jobtype": "ping",   "retry": 3,   "timeout": 3 }

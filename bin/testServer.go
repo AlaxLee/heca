@@ -4,12 +4,20 @@ import (
 	"github.com/AlaxLee/heca"
 	"net/http"
 	"net/url"
-	"log"
+	log "github.com/cihub/seelog"
+	"io/ioutil"
+	"encoding/json"
 )
 
 func main() {
 
-	err := heca.InitConfig()
+	var err error
+	err = heca.InitLogger()
+	if err != nil {
+		panic(err)
+	}
+
+	err = heca.InitConfig()
 	if err != nil {
 		panic(err)
 	}
@@ -27,8 +35,23 @@ func main() {
 			return
 		}
 
+		reqBody, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, "read body failed: " + err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		b := make([]map[string]interface{}, 0)
+		err = json.Unmarshal(reqBody, &b)
+		if err != nil {
+			http.Error(w, "body is not a array json: " + err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		log.Infof("get %d metrics", len(b))
+
 		w.Write([]byte("success"))
 	})
 
-	log.Fatal(http.ListenAndServe(u.Host, nil))
+	log.Error(http.ListenAndServe(u.Host, nil))
 }

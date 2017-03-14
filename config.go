@@ -24,6 +24,10 @@ type ControllerConfig struct {
 								//Seq   int  `json:"seq"`
 }
 
+type ApiConfig struct {
+	ListenAddress string `json:"listenAddress"`   //Api本地监听地址
+}
+
 type PushConfig struct {
 	Limit     int    `json:"limit"`     //推送一次的最大数量
 	TimeWait  int64  `json:"timewait"`  //推送一次的时间间隔
@@ -31,10 +35,26 @@ type PushConfig struct {
 	APIUrl    string `json:"apiUrl"`    //推送的接口
 }
 
+type JobConfig struct {
+	Source string                 `json:"source"`   //job监控配置的来源，目前可选file或etcd
+	File   *JobSourceFileConfig   `json:"file"`     //来源为file的配置
+	Argus  *JobSourceArgusConfig  `json:"argus"`    //来源为etcd的配置
+}
+
+type JobSourceFileConfig struct {
+	Path string  `json:"path"`    //文件路径
+}
+
+type JobSourceArgusConfig struct {
+
+}
+
 
 type GlobalConfig struct {
 	Push       *PushConfig        `json:"push"`
 	Controller *ControllerConfig  `json:"controller"`
+	Api        *ApiConfig         `json:"api"`
+	Job        *JobConfig         `json:"job"`
 }
 
 
@@ -67,7 +87,7 @@ func init() {
 	Home = home
 }
 
-func InitConfig()  error{
+func InitConfig() error {
 	return ParseConfig(Home + "/conf/heca.json")
 }
 
@@ -94,8 +114,21 @@ func ParseConfig(configFilePath string) error {
 
 
 
+func getJobMonConfig() (total uint, seq uint, configs map[string]string) {
+	switch Config().Job.Source {
+	case "argus":
+	default:  //默认file
+		total, seq, configs = getJobMonConfigFromFile()
+	}
+	return
+}
 
-func getJobConfig() (total uint, seq uint, configs map[string]string){
+func getJobMonConfigFromArgus() (total uint, seq uint, configs map[string]string) {
+	return
+}
+
+
+func getJobMonConfigFromFile() (total uint, seq uint, configs map[string]string){
 
 	total = 2
 	seq = 1
@@ -122,7 +155,7 @@ func getJobConfig() (total uint, seq uint, configs map[string]string){
 	configs = make(map[string]string)
 
 
-	configFilePath := Home + "/conf/hostlist"
+	configFilePath := Home + "/" + Config().Job.File.Path
 
 	blankRegx, err := regexp.Compile("\\s+")
 	if err != nil {
@@ -146,16 +179,7 @@ func getJobConfig() (total uint, seq uint, configs map[string]string){
 			continue
 		}
 		jobId := info[0]
-		address := info[1]
-
-		jobInfo := map[string]interface{} {
-			"endpoint": jobId,
-			"jobType": "ping",
-			"jobInterval" : 60,
-			"address": address,
-			"timeout": 3,
-			"retry": 3,
-		}
+		jobInfo := info[1]
 
 		configContent, err := RearrangeJson(jobInfo)
 		if err != nil {

@@ -12,35 +12,31 @@ import (
 
 
 type Controller struct {
-	config        JobsConfig       //只起记录作用
-	resultQueue   chan interface{} //用于存放执行结果的队列
+	Total                   uint                   //当前注册的 controller 总数量
+	Seq                     uint                   //本 controller 的编号
 
+	resultQueue             chan interface{}       //用于存放执行结果的队列
 
-	jobsMutex     *sync.RWMutex
-	jobs          map[string]*Job  //这里 map 的 key 是 Job.id
+	jobsMonConfigMutex      *sync.RWMutex
+	jobsMonConfig           map[string]interface{} //这里 map 的 key 是 Job.id，用于快速比对新老job是否一致
+	jobsMonConfigChangeTime time.Time
+
+	jobsMutex               *sync.RWMutex
+	jobs                    map[string]*Job        //这里 map 的 key 是 Job.id
 }
-
-type JobsConfig struct {
-	Total      uint                   //当前注册的 controller 总数量
-	Seq        uint                   //本 controller 的编号
-
-	mux        *sync.RWMutex
-	jobConfigs map[string]interface{} //这里 map 的 key 是 Job.id，用于快速比对新老job是否一致
-	changeTime time.Time
-}
-
 
 func NewController() *Controller {
 
 	ct := &Controller{
-		config: JobsConfig{
-			mux: &sync.RWMutex{},
-			jobConfigs: make(map[string]interface{}),
-			changeTime: time.Now(),
-		},
-		resultQueue: make(chan interface{}, Config().Controller.ResultQueueLength),
-		jobsMutex: &sync.RWMutex{},
-		jobs: make(map[string]*Job),
+
+		resultQueue:              make(chan interface{}, Config().Controller.ResultQueueLength),
+
+		jobsMonConfigMutex:       &sync.RWMutex{},
+		jobsMonConfig:            make(map[string]interface{}),
+		jobsMonConfigChangeTime:  time.Now(),
+
+		jobsMutex:                &sync.RWMutex{},
+		jobs:                     make(map[string]*Job),
 	}
 
 	return ct
@@ -89,9 +85,9 @@ func (ct *Controller) startAPI() {
 
 
 func (ct *Controller) reloadAllJobs() {
-	total, seq, jobConfigs:= getJobConfig()
+	total, seq, jobsMonConfig := getJobMonConfig()
 
-	//对比当前的 ct.jobConfigs 和 新得到的 jogConfigs，然后新增的Add，有变化的Update，减少的Del，未变化的检查running状态
+	//对比当前的 ct.jobsConfig 和 新得到的 jogConfigs，然后新增的Add，有变化的Update，减少的Del，未变化的检查running状态
 	addList := make(map[string]string)
 	updateList := make(map[string]string)
 	delList := make(map[string]string)
@@ -106,10 +102,10 @@ func (ct *Controller) reloadAllJobs() {
 		delList[oldId] = ""
 	}
 
-	for newId, newConfigString := range jobConfigs {
+	for newId, newConfigString := range jobsMonConfig {
 		job, ok := ct.jobs[newId]
 		if ok {
-			if newConfigString != job.configString {
+			if newConfigString != job.monConfigString {
 				updateList[newId] = newConfigString
 			} else {
 				checkList[newId] = ""
@@ -160,22 +156,17 @@ func (ct *Controller) reloadAllJobs() {
 		}
 	}
 
-	defer ct.config.mux.Unlock()
-	ct.config.mux.Lock()
+	defer ct.jobsMonConfigMutex.Unlock()
+	ct.jobsMonConfigMutex.Lock()
 
-	ct.config.Total = total
-	ct.config.Seq = seq
+	ct.Total = total
+	ct.Seq = seq
 
-	ct.config.jobConfigs = make(map[string]interface{})
+	ct.jobsMonConfig = make(map[string]interface{})
 	for id, j := range ct.jobs {
-		ct.config.jobConfigs[id] = j.config.AllSettings()
-		//err := json.Unmarshal([]bytes(j.configString), ct.config.jobConfigs[id])
-		//if err != nil {
-		//	log.Errorf("ERROR: unmarshal %s's job configString failed\n", j.id, err.Error())
-		//	continue
-		//}
+		ct.jobsMonConfig[id] = j.monConfig.AllSettings()
 	}
-	ct.config.changeTime = time.Now()
+	ct.jobsMonConfigChangeTime = time.Now()
 }
 
 
@@ -204,18 +195,18 @@ func (ct *Controller) createJobObj(id string, configString string) (*Job, error)
 
 
 func (ct *Controller) GetInstanceTotal() uint {
-	return ct.config.Total
+	return ct.Total
 }
 
 func (ct *Controller) GetInstanceSeq() uint {
-	return ct.config.Seq
+	return ct.Seq
 }
 
 func (ct *Controller) GetConfig() map[string]interface{} {
 
-	defer ct.config.mux.RUnlock()
-	ct.config.mux.RLock()
-	return ct.config.jobConfigs
+	defer ct.jobsMonConfigMutex.RUnlock()
+	ct.jobsMonConfigMutex.RLock()
+	return ct.jobsMonConfig
 }
 
 func (ct *Controller) AddJob(id string, originConfigString string)  (map[string]interface{}, error) {
@@ -238,8 +229,8 @@ func (ct *Controller) AddJob(id string, originConfigString string)  (map[string]
 	job, ok := ct.jobs[id]
 
 	if ok {
-		if job.configString != configString {
-			log.Errorf("job[" + id + "] has exists，but is not equal: \n" + job.configString + "\n" + configString + "\n" )
+		if job.monConfigString != configString {
+			log.Errorf("job[" + id + "] has exists，but is not equal: \n" + job.monConfigString + "\n" + configString + "\n" )
 			return nil, errors.New("job[" + id + "] has exists，but config is not equal")
 		} else {
 			return job.getCurrentStat(), nil
@@ -248,11 +239,11 @@ func (ct *Controller) AddJob(id string, originConfigString string)  (map[string]
 		ct.jobs[id] = j
 		go j.start()
 
-		defer ct.config.mux.Unlock()
-		ct.config.mux.Lock()
+		defer ct.jobsMonConfigMutex.Unlock()
+		ct.jobsMonConfigMutex.Lock()
 
-		ct.config.jobConfigs[id] = j.config.AllSettings()
-		ct.config.changeTime = time.Now()
+		ct.jobsMonConfig[id] = j.monConfig.AllSettings()
+		ct.jobsMonConfigChangeTime = time.Now()
 
 		return j.getCurrentStat(), nil
 
@@ -260,8 +251,8 @@ func (ct *Controller) AddJob(id string, originConfigString string)  (map[string]
 }
 
 func (ct *Controller) DelJob(id string) (map[string]interface{}, error) {
-	defer ct.config.mux.Unlock()
-	ct.config.mux.Lock()
+	defer ct.jobsMonConfigMutex.Unlock()
+	ct.jobsMonConfigMutex.Lock()
 	defer ct.jobsMutex.Unlock()
 	ct.jobsMutex.Lock()
 
@@ -272,7 +263,7 @@ func (ct *Controller) DelJob(id string) (map[string]interface{}, error) {
 	if ok {
 		job.stop()
 		result = job.getCurrentStat()
-		delete(ct.config.jobConfigs, id)
+		delete(ct.jobsMonConfig, id)
 		delete(ct.jobs, id)
 
 	} else {
@@ -309,16 +300,16 @@ func (ct *Controller) UpdateJob(id string, originConfigString string) (map[strin
 
 
 
-	if job.configString != configString {
+	if job.monConfigString != configString {
 		job.stop()
 		ct.jobs[id] = j
 		go j.start()
 
-		defer ct.config.mux.Unlock()
-		ct.config.mux.Lock()
+		defer ct.jobsMonConfigMutex.Unlock()
+		ct.jobsMonConfigMutex.Lock()
 
-		ct.config.jobConfigs[id] = j.config.AllSettings()
-		ct.config.changeTime = time.Now()
+		ct.jobsMonConfig[id] = j.monConfig.AllSettings()
+		ct.jobsMonConfigChangeTime = time.Now()
 
 		return j.getCurrentStat(), nil
 

@@ -32,8 +32,8 @@ type Job struct {
 
 	result          chan<- interface{} //任务的结果反馈
 
-	configString    string             //本job的配置，未曾解析过
-	config          *viper.Viper       //本job的配置，已经解析过了
+	monConfigString string             //本job的配置，未曾解析过
+	monConfig       *viper.Viper       //本job的配置，已经解析过了
 	executiveEntity plugin             //具体执行体
 }
 
@@ -57,16 +57,16 @@ func NewJob(id string, v *viper.Viper, resultQueue chan<- interface{}) (*Job, er
 	}
 
 	j := &Job{
-		id: id,
-		status: JOB_STATUS_AVAILABLE,
-		jobType: jobType,
-		jobInterval: jobInterval,
-		starttime: time.Now(),
-		jobSignal: make(chan string, JOB_SIGNAL_CACHE_SIZE),
-		excutePool: make(chan int, JOB_EXCUTE_POOL_SIZE),
-		result: resultQueue,
-		configString: configString,
-		config: v,
+		id:              id,
+		status:          JOB_STATUS_AVAILABLE,
+		jobType:         jobType,
+		jobInterval:     jobInterval,
+		starttime:       time.Now(),
+		jobSignal:       make(chan string, JOB_SIGNAL_CACHE_SIZE),
+		excutePool:      make(chan int, JOB_EXCUTE_POOL_SIZE),
+		result:          resultQueue,
+		monConfigString: configString,
+		monConfig:       v,
 		executiveEntity: plugin,
 	}
 
@@ -142,7 +142,7 @@ func (j *Job) getCurrentStat() (stat map[string]interface{}){
 
 	stat = map[string]interface{} {
 		"status" : j.status,
-		"config" : j.config.AllSettings(),
+		"config" : j.monConfig.AllSettings(),
 	}
 	return stat
 }

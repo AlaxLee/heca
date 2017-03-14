@@ -1,0 +1,28 @@
+{
+  "api" : {
+    "listenAddress" : "localhost:6060"
+  },
+
+  "controller" : {
+    "resultQueueLength" : 5000000,
+    "watcherEnabled" : false,
+    "watcherInterval" : 60
+  },
+
+  "push" : {
+    "limit" : 1000,
+    "timewait" : 10,
+    "retry" : 3,
+    "apiUrl" : "http://127.0.0.1:12050/v1/push"
+  },
+
+  "job" : {
+    "source" : "file",
+    "file" : {
+      "path" : "conf/hostlist"
+    },
+    "argus" : {
+
+    }
+  }
+}

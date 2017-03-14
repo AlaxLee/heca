@@ -13,7 +13,7 @@ const (
 	PUSH_INTERVAL = 1 * time.Millisecond   //单位毫秒
 )
 
-func SendToArgus(inChan chan interface{}) {
+func SendToArgus(dataChan chan interface{}) {
 
 	pushLimit := Config().Push.Limit
 	pushTimewait := Config().Push.TimeWait
@@ -33,7 +33,7 @@ SEND:
 		}
 
 		select {
-		case data, ok := <-inChan:
+		case data, ok := <-dataChan:
 			if ok {
 				dataList[i] = data
 				i++
