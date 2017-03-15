@@ -4,7 +4,6 @@ import (
 	"time"
 	"github.com/spf13/viper"
 	log "github.com/cihub/seelog"
-	"fmt"
 	"errors"
 )
 
@@ -12,6 +11,7 @@ const (
 	JOB_STATUS_AVAILABLE  = "available"
 	JOB_STATUS_RUNNING    = "running"
 	JOB_STATUS_STOPPED    = "stopped"
+	JOB_STATUS_BLOCKING   = "blocking"
 
 	JOB_SIGNAL_CACHE_SIZE = 1
 	JOB_SIGNAL_STOP       = "exit"
@@ -92,7 +92,7 @@ func (j *Job)start() {
 		case m := <- j.jobSignal:
 			switch m {
 			case JOB_SIGNAL_STOP:
-				fmt.Println("job " + j.id + " get stop signal")
+				log.Debugf("job %s get stop signal", j.id)
 				break Loop
 			}
 		default:
@@ -117,15 +117,8 @@ func (j *Job)start() {
 			case job.excutePool <- 1:
 				isRunning = true
 				job.executiveEntity.Do(j.result)
-			/*
-							if job.result == nil {
-								job.executiveEntity.Do()
-							} else {
-								job.result <- job.executiveEntity.Do()
-							}
-			*/
 			default:
-				job.status = "blocking"
+				job.status = JOB_STATUS_BLOCKING
 				isRunning = false
 			}
 		}(j)

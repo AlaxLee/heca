@@ -108,7 +108,7 @@ func ParseConfig(configFilePath string) error {
 
 	globalConfig = &c
 
-	log.Info("read config file: ", configFilePath, " successfully")
+	log.Trace("read config file: ", configFilePath, " successfully")
 	return nil
 }
 

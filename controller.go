@@ -113,14 +113,13 @@ func (ct *Controller) reloadAllJobs() {
 			delete(delList, newId)
 		} else {
 			addList[newId] = newConfigString
-			fmt.Println(newId)
 		}
 	}
 
 
 
 	for id, configString := range addList {
-		fmt.Println("Add: " + id)
+		log.Debugf("[from reload] Add: %s", id)
 		j, err := ct.createJobObj(id, configString)
 		if err != nil {
 			log.Errorf("ERROR: create %s's job failed\n", id, err.Error())
@@ -131,7 +130,7 @@ func (ct *Controller) reloadAllJobs() {
 	}
 
 	for id, configString := range updateList {
-		fmt.Println("Update: " + id)
+		log.Debugf("[from reload] Update: %s", id)
 		j, err := ct.createJobObj(id, configString)
 		if err != nil {
 			log.Errorf("ERROR: create %s's job failed\n", id, err.Error())
@@ -143,13 +142,13 @@ func (ct *Controller) reloadAllJobs() {
 	}
 
 	for id := range delList {
-		fmt.Println("Del: " + id)
+		log.Debugf("[from reload] Del: %s", id)
 		ct.jobs[id].stop()
 		delete(ct.jobs, id)
 	}
 
 	for id := range checkList {
-		fmt.Println("Check: " + id)
+		log.Debugf("[from reload] Check for start: %s", id)
 		j := ct.jobs[id]
 		if j.jobInterval > 0  &&  j.status == "stopped" {
 			go j.start()
@@ -319,11 +318,13 @@ func (ct *Controller) UpdateJob(id string, originConfigString string) (map[strin
 
 }
 
-func (ct *Controller) GetJob(id string) (result map[string]interface{}) {
+func (ct *Controller) GetJob(ids []string) (result map[string]interface{}) {
 
 	result = make(map[string]interface{})
-	if j, ok := ct.jobs[id]; ok {
-		result[id] = j.getCurrentStat()
+	for _, id := range ids {
+		if j, ok := ct.jobs[id]; ok {
+			result[id] = j.getCurrentStat()
+		}
 	}
 	return result
 }
@@ -344,3 +345,21 @@ func (ct *Controller) ReloadAllJobs() map[string]interface{} {
 }
 
 
+func (ct *Controller) GetStatus(ids []string) (result map[string]interface{}) {
+	result = make(map[string]interface{})
+	for _, id := range ids {
+		if j, ok := ct.jobs[id]; ok {
+			result[id] = j.status
+		}
+	}
+	return result
+}
+
+
+func (ct *Controller) GetAllStatus() (result map[string]interface{}) {
+	result = make(map[string]interface{})
+	for id, j := range ct.jobs {
+		result[id] = j.status
+	}
+	return result
+}

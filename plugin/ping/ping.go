@@ -108,7 +108,7 @@ func (p *MyPing) Do(resultChan chan<- interface{}) {
 
 	p.result.delay = keepDecimalPlacesOnFloat64(p.result.delay, 3)
 
-	log.Debugf("ping %s(%s):   available: %d, delay: %.3f, loss: %.2f, err: %s\n", p.endpoint, p.address, p.result.available, p.result.delay, p.result.loss, p.result.err)
+	log.Tracef("ping %s(%s):   available: %d, delay: %.3f, loss: %.2f, err: %s", p.endpoint, p.address, p.result.available, p.result.delay, p.result.loss, p.result.err)
 
 	resultChan <- map[string]interface{} {
 		"endpoint": p.endpoint,
@@ -271,16 +271,3 @@ func keepDecimalPlacesOnFloat64(value float64, n uint) float64{
 
 	return result
 }
-
-/*
-api 对外提供接口：
-	查性能
-	任务操作：增加、删除、修改、查询（单个和全部）
-	当前实例的信息：实例总数、本实例编号、获得的配置内容
-
-controller:
-	控制并发（要知道当前活着的 Goroutine 有哪些，应该有哪些，哪些异常退出了，缺了的能创建，多出来的就关掉）
-
-
-考虑每个任务放在一个go里面，这样一来就需要检测任务是不是挂了，挂了就要重新启动
-*/

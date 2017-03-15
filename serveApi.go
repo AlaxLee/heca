@@ -1,10 +1,10 @@
 package heca
 
 import (
-	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"encoding/json"
+	log "github.com/cihub/seelog"
 )
 
 type apiServer struct {
@@ -17,10 +17,40 @@ func NewApiServer(controller *Controller) *apiServer {
 
 func (a *apiServer) start() {
 
-	http.HandleFunc("/api/job/search", func(w http.ResponseWriter, r *http.Request) {
-		jobid := r.FormValue("jobid")
+	http.HandleFunc("/api/job/status", func(w http.ResponseWriter, r *http.Request) {
+		err := r.ParseForm()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-		result := a.ct.GetJob(jobid)
+		result := make(map[string]interface{})
+
+		jobids, ok := r.Form["jobids"]
+
+		if !ok  ||  len(jobids) == 0 {
+			result = a.ct.GetAllStatus()
+		} else {
+			result = a.ct.GetStatus(jobids)
+		}
+
+		RenderJson(w, result)
+	})
+
+	http.HandleFunc("/api/job/search", func(w http.ResponseWriter, r *http.Request) {
+		err := r.ParseForm()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		jobids, ok := r.Form["jobids"]
+		if !ok {
+			http.Error(w, "need params jobids", http.StatusInternalServerError)
+			return
+		}
+
+		result := a.ct.GetJob(jobids)
 
 		RenderJson(w, result)
 	})
@@ -38,9 +68,6 @@ func (a *apiServer) start() {
 		jobid := r.FormValue("jobid")
 
 		result, err := a.ct.DelJob(jobid)
-		fmt.Println(jobid)
-		fmt.Println(result)
-		fmt.Println(err)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -85,7 +112,7 @@ func (a *apiServer) start() {
 
 
 	go func() {
-		fmt.Println(http.ListenAndServe(Config().Api.ListenAddress, nil))
+		log.Critical(http.ListenAndServe(Config().Api.ListenAddress, nil))
 	}()
 }
 
